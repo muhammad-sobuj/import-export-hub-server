@@ -11,12 +11,9 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-
- admin.initializeApp({
+admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
-
-
 
 // MongoDB URI
 const uri = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@cluster0.dzvjfpc.mongodb.net/?appName=Cluster0`;
@@ -83,18 +80,94 @@ async function run() {
       });
     });
 
-
-    //  Update Product
-    app.put("/product/:id", async (req, res) => {
+    app.get("/product/:id", async (req, res) => {
       const { id } = req.params;
+      const result = await productCollection.findOne({ _id: new ObjectId(id) });
+
+      if (!result) {
+        // Return a 404 status and an empty JSON object when product is not found
+        return res.status(404).send({});
+      }
+
+      res.send(result);
+    });
+
+    app.post("/import", async (req, res) => {
+     
       const data = req.body;
-      const filter = { _id: new ObjectId(id) };
-      const update = { $set: data };
-      const result = await productCollection.updateOne(filter, update);
+      const { productId, importedQuantity } = data;
+
+      if (!productId || !importedQuantity || importedQuantity <= 0) {
+        return res.status(400).send({
+          success: false,
+          message: "Invalid product or quantity specified.",
+        });
+      }
+
+      const importData = {
+        ...data,
+        productId: new ObjectId(productId),
+        quantity: importedQuantity,
+        downloaded_at: new Date(),
+      };
+      const result = await importCollection.insertOne(importData);
+
+      const filter = { _id: new ObjectId(productId) };
+      const update = {
+        $inc: {
+          available_quantity: -Math.abs(importedQuantity),
+
+          downloads: Math.abs(importedQuantity),
+        },
+      };
+      const updatedProduct = await productCollection.updateOne(filter, update);
+
       res.send({
         success: true,
         result,
+        updatedProduct,
       });
+    });
+
+    //  Update Product
+    // app.put("/product/:id", async (req, res) => {
+    //   const { id } = req.params;
+    //   const data = req.body;
+    //   const filter = { _id: new ObjectId(id) };
+    //   const update = { $set: data };
+    //   const result = await productCollection.updateOne(filter, update);
+    //   res.send({
+    //     success: true,
+    //     result,
+    //   });
+    // });
+
+    app.put("/product/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const updatedData = req.body;
+
+        // ObjectId
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).json({ message: "Invalid product ID" });
+        }
+
+        const result = await productCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updatedData }
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).json({ message: "Product not found" });
+        }
+
+        res.json({ success: true, message: "Product updated successfully" });
+      } catch (error) {
+        console.error("Update product error:", error);
+        res
+          .status(500)
+          .json({ message: "Server error while updating product" });
+      }
     });
 
     //  Delete Product
@@ -119,16 +192,30 @@ async function run() {
     });
 
     //  Import (like download tracking)
+
+    // Import Product
     app.post("/imports/:id", async (req, res) => {
-      const id = req.params.id;
+      const { id } = req.params;
       const data = req.body;
+      const { quantity } = data;
 
-      // insert into imports collection
-      const result = await importCollection.insertOne(data);
+      const importData = {
+        ...data,
+        productId: new ObjectId(id),
+        quantity: quantity || 1,
+      };
+    
+      const result = await importCollection.insertOne(importData);
 
-      // increment "downloads" count
       const filter = { _id: new ObjectId(id) };
-      const update = { $inc: { downloads: 1 } };
+      const update = {
+        $inc: {
+     
+          available_quantity: -Math.abs(quantity),
+         
+          downloads: Math.abs(quantity),
+        },
+      };
       const updatedProduct = await productCollection.updateOne(filter, update);
 
       res.send({
@@ -146,20 +233,6 @@ async function run() {
         .toArray();
       res.send(result);
     });
-
-    // check 
-//     app.get("/imports/check/:id", async (req, res) => {
-//   const { id } = req.params;
-//   const { email } = req.query;
-
-//   try {
-//     const existing = await import.findOne({ productId: id, downloaded_by: email });
-//     res.json({ exists: !!existing });
-//   } catch (error) {
-//     console.error("Check import error:", error);
-//     res.status(500).json({ exists: false, error: "Server error" });
-//   }
-// });
 
     // Connection Test
     await client.db("admin").command({ ping: 1 });
