@@ -130,18 +130,6 @@ async function run() {
     });
 
     //  Update Product
-    // app.put("/product/:id", async (req, res) => {
-    //   const { id } = req.params;
-    //   const data = req.body;
-    //   const filter = { _id: new ObjectId(id) };
-    //   const update = { $set: data };
-    //   const result = await productCollection.updateOne(filter, update);
-    //   res.send({
-    //     success: true,
-    //     result,
-    //   });
-    // });
-
     app.put("/product/:id", async (req, res) => {
       try {
         const { id } = req.params;
