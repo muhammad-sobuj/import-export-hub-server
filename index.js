@@ -31,22 +31,37 @@ async function run() {
   try {
     await client.connect();
     const db = client.db("export_import-db");
-    const productCollection = db.collection("export_import");
-    const importCollection = db.collection("import");
+    // const productCollection = db.collection("export_import");
+    // const importCollection = db.collection("import");
 
+    const products = () => db.collection("export_import");
+    const imports = () => db.collection("imports");
+    const exportCollection = db.collection("exports");
     console.log(" MongoDB Connected Successfully!");
 
-    //  CRUD Operations
-
-    // Get All Products
+    // GET all products
     app.get("/products", async (req, res) => {
-      const result = await productCollection.find().toArray();
-      res.send(result);
+      const list = await products().find({}).toArray();
+      res.json(list);
+    });
+
+    // Search Products
+    app.get("/search", async (req, res) => {
+      const search_text = req.query.search || "";
+      try {
+        const result = await products()
+          .find({ name: { $regex: search_text, $options: "i" } })
+          .toArray();
+        res.json(result);
+      } catch (err) {
+        console.error("Search error:", err);
+        res.status(500).json({ error: "Failed to search products" });
+      }
     });
 
     // Get Latest 6 Products
     app.get("/latest-products", async (req, res) => {
-      const result = await productCollection
+      const result = await products()
         .find()
         .sort({ created_at: -1 })
         .limit(6)
@@ -54,172 +69,148 @@ async function run() {
       res.send(result);
     });
 
-    //  Get My Products (by email)
-    app.get("/my-products", async (req, res) => {
-      const email = req.query.email;
-      const result = await productCollection
-        .find({ created_by: email })
-        .toArray();
-      res.send(result);
+    // GET product by id
+    app.get("/products/:id", async (req, res) => {
+      const id = req.params.id;
+      const p = await products().findOne({ _id: new ObjectId(id) });
+      res.json(p);
     });
 
-    //  Get Single Product by ID
-    app.get("/product/:id", async (req, res) => {
-      const { id } = req.params;
-      const result = await productCollection.findOne({ _id: new ObjectId(id) });
-      res.send(result);
+    // POST add product
+    app.post("/products", async (req, res) => {
+      const body = req.body;
+      const result = await products().insertOne(body);
+      res.json({ insertedId: result.insertedId });
     });
 
-    //  Create New Product
-    app.post("/product", async (req, res) => {
-      const data = req.body;
-      const result = await productCollection.insertOne(data);
-      res.send({
-        success: true,
-        result,
-      });
+    // PATCH update product
+    app.patch("/products/:id", async (req, res) => {
+      const id = req.params.id;
+      const body = req.body;
+      const update = { $set: body };
+      const result = await products().updateOne(
+        { _id: new ObjectId(id) },
+        update
+      );
+      res.json(result);
     });
 
-    app.get("/product/:id", async (req, res) => {
-      const { id } = req.params;
-      const result = await productCollection.findOne({ _id: new ObjectId(id) });
+    // DELETE product
+    app.delete("/products/:id", async (req, res) => {
+      const id = req.params.id;
+      await products().deleteOne({ _id: new ObjectId(id) });
+      res.json({ deleted: true });
+    });
 
-      if (!result) {
-        // Return a 404 status and an empty JSON object when product is not found
-        return res.status(404).send({});
+    // POST import (create an import record and decrement product quantity)
+    app.post("/import/:id", async (req, res) => {
+      const id = req.params.id;
+      const { email, importedQuantity } = req.body; // importedQuantity: number
+
+      // read product to check availability
+      const product = await products().findOne({ _id: new ObjectId(id) });
+      if (!product) return res.status(404).json({ error: "Product not found" });
+      if (importedQuantity > product.availableQuantity) {
+        return res
+          .status(400)
+          .json({ error: "Import quantity exceeds available quantity" });
       }
 
-      res.send(result);
-    });
-
-    app.post("/import", async (req, res) => {
-     
-      const data = req.body;
-      const { productId, importedQuantity } = data;
-
-      if (!productId || !importedQuantity || importedQuantity <= 0) {
-        return res.status(400).send({
-          success: false,
-          message: "Invalid product or quantity specified.",
-        });
-      }
-
-      const importData = {
-        ...data,
-        productId: new ObjectId(productId),
-        quantity: importedQuantity,
-        downloaded_at: new Date(),
-      };
-      const result = await importCollection.insertOne(importData);
-
-      const filter = { _id: new ObjectId(productId) };
-      const update = {
-        $inc: {
-          available_quantity: -Math.abs(importedQuantity),
-
-          downloads: Math.abs(importedQuantity),
+      // insert import record
+      const importDoc = {
+        productId: id,
+        importedQuantity,
+        imported_by: email,
+        createdAt: new Date(),
+        productSnapshot: {
+          name: product.name,
+          price: product.price,
+          image: product.image,
+          originCountry: product.origin_country,
+          rating: product.rating,
         },
       };
-      const updatedProduct = await productCollection.updateOne(filter, update);
+      const r = await imports().insertOne(importDoc);
 
-      res.send({
-        success: true,
-        result,
-        updatedProduct,
-      });
+      // decrement product availableQuantity
+      await products().updateOne(
+        { _id: new ObjectId(id) },
+        { $inc: { availableQuantity: -importedQuantity } }
+      );
+
+      res.json({ success: true, importId: r.insertedId });
     });
 
-    //  Update Product
-    app.put("/product/:id", async (req, res) => {
+    // GET imports by user email
+    app.get("/imports", async (req, res) => {
+      const { email } = req.query;
+      if (!email) return res.status(400).json({ error: "email required" });
+      const list = await imports().find({ imported_by: email }).toArray();
+      res.json(list);
+    });
+
+    // DELETE import (by import _id)
+    app.delete("/imports/:id", async (req, res) => {
+      const id = req.params.id;
+      // optional: when removing an import you might want to add back the quantity; here we *will not* revert product quantity. If you want revert, include logic.
+      await imports().deleteOne({ _id: new ObjectId(id) });
+      res.json({ deleted: true });
+    });
+
+    // GET: user-wise exports
+    app.get("/exports", async (req, res) => {
+      const email = req.query.email;
       try {
-        const { id } = req.params;
-        const updatedData = req.body;
-
-        // ObjectId
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).json({ message: "Invalid product ID" });
-        }
-
-        const result = await productCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: updatedData }
-        );
-
-        if (result.matchedCount === 0) {
-          return res.status(404).json({ message: "Product not found" });
-        }
-
-        res.json({ success: true, message: "Product updated successfully" });
+        const result = await exportCollection
+          .find({ addedBy: email })
+          .toArray();
+        res.json(result);
       } catch (error) {
-        console.error("Update product error:", error);
-        res
-          .status(500)
-          .json({ message: "Server error while updating product" });
+        console.error("Fetch exports error:", error);
+        res.status(500).json({ error: "Failed to fetch exports" });
       }
     });
 
-    //  Delete Product
-    app.delete("/product/:id", async (req, res) => {
+    //  POST: add new export product
+    app.post("/exports", async (req, res) => {
+      const product = req.body;
+      try {
+        const result = await exportCollection.insertOne(product);
+        res.json(result);
+      } catch (error) {
+        console.error("Add export error:", error);
+        res.status(500).json({ error: "Failed to add export" });
+      }
+    });
+
+    // 🟡 PUT: update product
+    app.put("/exports/:id", async (req, res) => {
       const { id } = req.params;
-      const result = await productCollection.deleteOne({
-        _id: new ObjectId(id),
-      });
-      res.send({
-        success: true,
-        result,
-      });
+      const updateData = req.body;
+      try {
+        const result = await exportCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updateData }
+        );
+        res.json(result);
+      } catch (error) {
+        console.error("Update export error:", error);
+        res.status(500).json({ error: "Failed to update export" });
+      }
     });
 
-    // Search Products
-    app.get("/search", async (req, res) => {
-      const search_text = req.query.search || "";
-      const result = await productCollection
-        .find({ name: { $regex: search_text, $options: "i" } })
-        .toArray();
-      res.send(result);
-    });
-
-    //  Import (like download tracking)
-
-    // Import Product
-    app.post("/imports/:id", async (req, res) => {
+    //  DELETE remove product
+    app.delete("/exports/:id", async (req, res) => {
       const { id } = req.params;
-      const data = req.body;
-      const { quantity } = data;
-
-      const importData = {
-        ...data,
-        productId: new ObjectId(id),
-        quantity: quantity || 1,
-      };
-    
-      const result = await importCollection.insertOne(importData);
-
-      const filter = { _id: new ObjectId(id) };
-      const update = {
-        $inc: {
-     
-          available_quantity: -Math.abs(quantity),
-         
-          downloads: Math.abs(quantity),
-        },
-      };
-      const updatedProduct = await productCollection.updateOne(filter, update);
-
-      res.send({
-        success: true,
-        result,
-        updatedProduct,
-      });
-    });
-
-    //  Get My Imports
-    app.get("/my-imports", async (req, res) => {
-      const email = req.query.email;
-      const result = await importCollection
-        .find({ downloaded_by: email })
-        .toArray();
-      res.send(result);
+      try {
+        const result = await exportCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+        res.json(result);
+      } catch (error) {
+        console.error("Delete export error:", error);
+        res.status(500).json({ error: "Failed to delete export" });
+      }
     });
 
     // Connection Test
