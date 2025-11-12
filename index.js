@@ -3,9 +3,12 @@ const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
 const admin = require("firebase-admin");
-const serviceAccount = require("./export-import-hub-firebase-admin-keys.json");
 const app = express();
 const port = process.env.PORT || 3000;
+
+// index.js
+const decoded = Buffer.from(process.env.FIREBASE_SERVICE_KEY, "base64").toString("utf8");
+const serviceAccount = JSON.parse(decoded);
 
 // Middleware
 app.use(cors());
@@ -29,12 +32,12 @@ const client = new MongoClient(uri, {
 // Main Function
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
     const db = client.db("export_import-db");
     const products = () => db.collection("export_import");
     const imports = () => db.collection("imports");
-    const exportCollection = db.collection("exports");
-    console.log(" MongoDB Connected Successfully!");
+    const exports =()=> db.collection("exports");
+
 
     // GET all products
     app.get("/products", async (req, res) => {
@@ -154,24 +157,24 @@ async function run() {
     });
 
     // GET exports
-    app.get("/exports", async (req, res) => {
-      const email = req.query.email;
-      try {
-        const result = await exportCollection()
-          .find({ addedBy: email })
-          .toArray();
-        res.json(result);
-      } catch (error) {
-        console.error("Fetch exports error:", error);
-        res.status(500).json({ error: "Failed to fetch exports" });
-      }
-    });
+  
+app.get("/exports", async (req, res) => {
+  const email = req.query.email;
+
+  try {
+  const result = await exports().find({ addedBy: email }).toArray();
+    res.json(result);
+  } catch (error) {
+    console.error("Error fetching exports:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
 
     //  POST add product
     app.post("/exports", async (req, res) => {
       const product = req.body;
       try {
-        const result = await exportCollection().insertOne(product);
+        const result = await exports().insertOne(product);
         res.json(result);
       } catch (error) {
         console.error("Add export error:", error);
@@ -184,7 +187,7 @@ async function run() {
       const { id } = req.params;
       const updateData = req.body;
       try {
-        const result = await exportCollection().updateOne(
+        const result = await exports().updateOne(
           { _id: new ObjectId(id) },
           { $set: updateData }
         );
@@ -199,7 +202,7 @@ async function run() {
     app.delete("/exports/:id", async (req, res) => {
       const { id } = req.params;
       try {
-        const result = await exportCollection().deleteOne({
+        const result = await exports().deleteOne({
           _id: new ObjectId(id),
         });
         res.json(result);
@@ -210,7 +213,7 @@ async function run() {
     });
 
     // Connection Test
-    await client.db("admin").command({ ping: 1 });
+    // await client.db("admin").command({ ping: 1 });
     console.log(" Ping successful — MongoDB is live!");
   } catch (error) {
     console.error(" Error connecting to MongoDB:", error);
