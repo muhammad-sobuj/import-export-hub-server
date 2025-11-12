@@ -32,7 +32,7 @@ const client = new MongoClient(uri, {
 // Main Function
 async function run() {
   try {
-    // await client.connect();
+    await client.connect();
     const db = client.db("export_import-db");
     const products = () => db.collection("export_import");
     const imports = () => db.collection("imports");
