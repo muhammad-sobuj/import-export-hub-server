@@ -31,9 +31,6 @@ async function run() {
   try {
     await client.connect();
     const db = client.db("export_import-db");
-    // const productCollection = db.collection("export_import");
-    // const importCollection = db.collection("import");
-
     const products = () => db.collection("export_import");
     const imports = () => db.collection("imports");
     const exportCollection = db.collection("exports");
@@ -102,12 +99,12 @@ async function run() {
       res.json({ deleted: true });
     });
 
-    // POST import (create an import record and decrement product quantity)
+    // POST import
     app.post("/import/:id", async (req, res) => {
       const id = req.params.id;
-      const { email, importedQuantity } = req.body; // importedQuantity: number
+      const { email, importedQuantity } = req.body; 
 
-      // read product to check availability
+      
       const product = await products().findOne({ _id: new ObjectId(id) });
       if (!product) return res.status(404).json({ error: "Product not found" });
       if (importedQuantity > product.availableQuantity) {
@@ -116,7 +113,7 @@ async function run() {
           .json({ error: "Import quantity exceeds available quantity" });
       }
 
-      // insert import record
+      // import record
       const importDoc = {
         productId: id,
         importedQuantity,
@@ -132,7 +129,7 @@ async function run() {
       };
       const r = await imports().insertOne(importDoc);
 
-      // decrement product availableQuantity
+     
       await products().updateOne(
         { _id: new ObjectId(id) },
         { $inc: { availableQuantity: -importedQuantity } }
@@ -141,7 +138,7 @@ async function run() {
       res.json({ success: true, importId: r.insertedId });
     });
 
-    // GET imports by user email
+    // GET imports email
     app.get("/imports", async (req, res) => {
       const { email } = req.query;
       if (!email) return res.status(400).json({ error: "email required" });
@@ -149,19 +146,18 @@ async function run() {
       res.json(list);
     });
 
-    // DELETE import (by import _id)
+    // DELETE import
     app.delete("/imports/:id", async (req, res) => {
       const id = req.params.id;
-      // optional: when removing an import you might want to add back the quantity; here we *will not* revert product quantity. If you want revert, include logic.
       await imports().deleteOne({ _id: new ObjectId(id) });
       res.json({ deleted: true });
     });
 
-    // GET: user-wise exports
+    // GET exports
     app.get("/exports", async (req, res) => {
       const email = req.query.email;
       try {
-        const result = await exportCollection
+        const result = await exportCollection()
           .find({ addedBy: email })
           .toArray();
         res.json(result);
@@ -171,11 +167,11 @@ async function run() {
       }
     });
 
-    //  POST: add new export product
+    //  POST add product
     app.post("/exports", async (req, res) => {
       const product = req.body;
       try {
-        const result = await exportCollection.insertOne(product);
+        const result = await exportCollection().insertOne(product);
         res.json(result);
       } catch (error) {
         console.error("Add export error:", error);
@@ -183,12 +179,12 @@ async function run() {
       }
     });
 
-    // 🟡 PUT: update product
+    // 🟡 PUT update product
     app.put("/exports/:id", async (req, res) => {
       const { id } = req.params;
       const updateData = req.body;
       try {
-        const result = await exportCollection.updateOne(
+        const result = await exportCollection().updateOne(
           { _id: new ObjectId(id) },
           { $set: updateData }
         );
@@ -203,7 +199,7 @@ async function run() {
     app.delete("/exports/:id", async (req, res) => {
       const { id } = req.params;
       try {
-        const result = await exportCollection.deleteOne({
+        const result = await exportCollection().deleteOne({
           _id: new ObjectId(id),
         });
         res.json(result);
