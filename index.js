@@ -2,21 +2,11 @@ const express = require("express");
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
-const admin = require("firebase-admin");
 const app = express();
 const port = process.env.PORT || 3000;
-
-// index.js
-const decoded = Buffer.from(process.env.FIREBASE_SERVICE_KEY, "base64").toString("utf8");
-const serviceAccount = JSON.parse(decoded);
-
 // Middleware
 app.use(cors());
 app.use(express.json());
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-});
 
 // MongoDB URI
 const uri = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@cluster0.dzvjfpc.mongodb.net/?appName=Cluster0`;
@@ -32,12 +22,11 @@ const client = new MongoClient(uri, {
 // Main Function
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
     const db = client.db("export_import-db");
     const products = () => db.collection("export_import");
     const imports = () => db.collection("imports");
-    const exports =()=> db.collection("exports");
-
+    const exports = () => db.collection("exports");
 
     // GET all products
     app.get("/products", async (req, res) => {
@@ -105,9 +94,8 @@ async function run() {
     // POST import
     app.post("/import/:id", async (req, res) => {
       const id = req.params.id;
-      const { email, importedQuantity } = req.body; 
+      const { email, importedQuantity } = req.body;
 
-      
       const product = await products().findOne({ _id: new ObjectId(id) });
       if (!product) return res.status(404).json({ error: "Product not found" });
       if (importedQuantity > product.availableQuantity) {
@@ -132,7 +120,6 @@ async function run() {
       };
       const r = await imports().insertOne(importDoc);
 
-     
       await products().updateOne(
         { _id: new ObjectId(id) },
         { $inc: { availableQuantity: -importedQuantity } }
@@ -157,18 +144,18 @@ async function run() {
     });
 
     // GET exports
-  
-app.get("/exports", async (req, res) => {
-  const email = req.query.email;
 
-  try {
-  const result = await exports().find({ addedBy: email }).toArray();
-    res.json(result);
-  } catch (error) {
-    console.error("Error fetching exports:", error);
-    res.status(500).json({ error: "Internal server error" });
-  }
-});
+    app.get("/exports", async (req, res) => {
+      const email = req.query.email;
+
+      try {
+        const result = await exports().find({ addedBy: email }).toArray();
+        res.json(result);
+      } catch (error) {
+        console.error("Error fetching exports:", error);
+        res.status(500).json({ error: "Internal server error" });
+      }
+    });
 
     //  POST add product
     app.post("/exports", async (req, res) => {
